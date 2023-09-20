@@ -1,4 +1,4 @@
-
+#include <assert.h>
 #include <limits.h>  /* for INT_MAX */
 #include <stdio.h>   /* for fprintf etc */
 #include <stdlib.h>  /* for free etc */
@@ -46,9 +46,9 @@ static void write_varname(struct generator * g, struct name * p) {
         case t_integer: {
             int count = p->count;
             if (count < 0) {
-                fprintf(stderr, "Reference to optimised out variable ");
-                report_b(stderr, p->b);
-                fprintf(stderr, " attempted\n");
+                p->s[SIZE(p->s)] = 0;
+                fprintf(stderr, "Reference to optimised out variable %s attempted\n",
+                        p->s);
                 exit(1);
             }
             if (p->type == t_boolean) {
@@ -66,7 +66,7 @@ static void write_varname(struct generator * g, struct name * p) {
         default:
             write_char(g, ch); write_char(g, '_');
     }
-    write_b(g, p->b);
+    write_s(g, p->s);
 }
 
 static void write_varref(struct generator * g, struct name * p) {  /* reference to variable */
@@ -131,6 +131,20 @@ static void write_margin(struct generator * g) {
     for (i = 0; i < g->margin; i++) write_string(g, "    ");
 }
 
+extern void write_c_relop(struct generator * g, int relop) {
+    switch (relop) {
+	case c_eq: write_string(g, " == "); break;
+	case c_ne: write_string(g, " != "); break;
+	case c_gr: write_string(g, " > "); break;
+	case c_ge: write_string(g, " >= "); break;
+	case c_ls: write_string(g, " < "); break;
+	case c_le: write_string(g, " <= "); break;
+	default:
+	    fprintf(stderr, "Unexpected type #%d in generate_integer_test\n", relop);
+	    exit(1);
+    }
+}
+
 void write_comment_content(struct generator * g, struct node * p) {
     switch (p->type) {
         case c_mathassign:
@@ -140,7 +154,7 @@ void write_comment_content(struct generator * g, struct node * p) {
         case c_divideassign:
             if (p->name) {
                 write_char(g, '$');
-                write_b(g, p->name->b);
+                write_s(g, p->name->s);
                 write_char(g, ' ');
             }
             write_string(g, name_of_token(p->type));
@@ -160,7 +174,7 @@ void write_comment_content(struct generator * g, struct node * p) {
             write_string(g, name_of_token(p->type));
             if (p->name) {
                 write_char(g, ' ');
-                write_b(g, p->name->b);
+                write_s(g, p->name->s);
             }
     }
     write_string(g, ", line ");
@@ -393,12 +407,251 @@ static void generate_AE(struct generator * g, struct node * p) {
     }
 }
 
+// Return 0 for always f.
+// Return 1 for always t.
+// Return -1 for don't know (or can raise t or f).
+static int check_possible_signals(struct generator * g,
+                                  struct node * p, int call_depth) {
+    switch (p->type) {
+        case c_fail:
+        case c_false:
+            /* Always gives signal f. */
+            return 0;
+        case c_assign:
+        case c_attach:
+        case c_debug:
+        case c_delete:
+        case c_do:
+        case c_insert:
+        case c_leftslice:
+        case c_repeat:
+        case c_rightslice:
+        case c_set:
+        case c_setmark:
+        case c_slicefrom:
+        case c_sliceto:
+        case c_tolimit:
+        case c_tomark:
+        case c_true:
+        case c_try:
+        case c_unset:
+        case c_mathassign:
+        case c_plusassign:
+        case c_minusassign:
+        case c_multiplyassign:
+        case c_divideassign:
+        case c_functionend:
+            /* Always gives signal t. */
+            return 1;
+        case c_not: {
+            int res = check_possible_signals(g, p->left, call_depth);
+            if (res >= 0)
+                res = !res;
+            if (res == 0 && p->right) {
+                fprintf(stderr, "%s:%d: warning: 'not' always signals f so following commands are dead code\n",
+                        g->analyser->tokeniser->file, p->line_number);
+                p->right = NULL;
+            }
+            return res;
+        }
+        case c_setlimit: {
+            /* If p->left signals f, setlimit does. */
+            int res = check_possible_signals(g, p->left, call_depth);
+            if (res == 0) {
+                return res;
+            }
+            /* Otherwise gives same signal as p->aux. */
+            int res2 = check_possible_signals(g, p->aux, call_depth);
+            if (res2 <= 0)
+                return res2;
+            return res;
+        }
+        case c_and: {
+            /* Gives same signal as p->left, but we want to warn. */
+            struct node * q;
+            int and_always_t = true;
+            for (q = p->left; q; q = q->right) {
+                // Just check this node - q->right is a separate clause of
+                // the AND.
+                int res = check_possible_signals(g, q, call_depth);
+                if (res == 0) {
+                    // If any clause of the AND always signals f, then the AND
+                    // always signals f.
+                    if (q->right) {
+                        fprintf(stderr, "%s:%d: warning: command always signals f here so rest of 'and' is dead code\n",
+                                g->analyser->tokeniser->file, q->line_number);
+                        q->right = NULL;
+                    }
+                    return 1;
+                }
+                if (res < 0) {
+                    and_always_t = false;
+                }
+            }
+            if (and_always_t) {
+                // If every clause of the AND always signals t, then the AND
+                // always signals t.
+                fprintf(stderr, "%s:%d: warning: every command in this 'and' always signals t\n",
+                       g->analyser->tokeniser->file, p->line_number);
+                return 1;
+            }
+            return -1;
+        }
+        case c_bra:
+            /* Gives same signal as p->left. */
+            return check_possible_signals_list(g, p->left, call_depth);
+        case c_atleast:
+        case c_backwards:
+        case c_loop:
+        case c_reverse:
+        case c_test:
+            /* Give same signal as p->left. */
+            return check_possible_signals(g, p->left, call_depth);
+        case c_call:
+            if (call_depth >= 100) {
+                /* Recursive functions aren't typical in snowball programs,
+                 * so make the pessimistic assumption that both t and f are
+                 * possible if we hit a generous limit on recursion.  It's
+                 * not likely to make a difference to any real world
+                 * program, but means we won't recurse until we run out of
+                 * stack for pathological cases.
+                 */
+                return -1;
+            }
+            return check_possible_signals_list(g, p->name->definition,
+                                               call_depth + 1);
+        case c_gopast:
+        case c_goto:
+            /* FIXME: unless we can prove that c is either definitely atlimit
+             * or definitely not atlimit... */
+            return -1;
+        case c_atlimit:
+        case c_atmark:
+        case c_booltest:
+        case c_hop:
+        case c_literalstring:
+        case c_next:
+        case c_eq:
+        case c_ne:
+        case c_gr:
+        case c_ge:
+        case c_ls:
+        case c_le:
+        case c_grouping:
+        case c_non:
+        case c_name:
+            /* FIXME: unless we can prove... */
+            return -1;
+        case c_substring: {
+            struct among * x = p->among;
+
+            if (x->literalstring_count > 0 &&
+                x->b[0].size == 0 &&
+                x->b[0].function == NULL) {
+                /* This substring can't fail since its among contains the empty
+                 * string without a gating function. */
+                return 1;
+            }
+            return -1;
+        }
+        case c_among: {
+            struct among * x = p->among;
+            int r = 1;
+
+            if (x->substring == 0) {
+                if (x->literalstring_count > 0 &&
+                    x->b[0].size == 0 &&
+                    x->b[0].function == NULL) {
+                    /* The implicit substring can't fail since its among
+                     * contains the empty string without a gating function. */
+                    return 1;
+                }
+                r = -1;
+            }
+
+            if (x->command_count > 0) {
+                int trues = (x->nocommand_count > 0);
+                int falses = false;
+                int i;
+                for (i = 1; i <= x->command_count; i++) {
+                    int res = check_possible_signals(g, x->commands[i - 1],
+                                                     call_depth);
+                    if (res == 0) {
+                        falses = true;
+                    } else if (res > 0) {
+                        trues = true;
+                    } else {
+                        falses = trues = true;
+                    }
+                    if (falses && trues) break;
+                }
+                if (!trues) {
+                    // All commands in among always fail.
+                    return 0;
+                }
+                if (falses) {
+                    // Commands in among can succeed or fail.
+                    return -1;
+                }
+            }
+            return r;
+        }
+        case c_or: {
+            struct node * q;
+            int or_always_f = true;
+            for (q = p->left; q; q = q->right) {
+                // Just check this node - q->right is a separate clause of
+                // the OR.
+                int res = check_possible_signals(g, q, call_depth);
+                if (res > 0) {
+                    // If any clause of the OR always signals t, then the OR
+                    // always signals t.
+                    if (q->right) {
+                        fprintf(stderr, "%s:%d: warning: command always signals t here so rest of 'or' is dead code\n",
+                                g->analyser->tokeniser->file, q->line_number);
+                        q->right = NULL;
+                    }
+                    return 1;
+                }
+                if (res < 0) {
+                    or_always_f = false;
+                }
+            }
+            if (or_always_f) {
+                // If every clause of the OR always signals f, then the OR
+                // always signals f.
+                fprintf(stderr, "%s:%d: warning: every command in this 'or' always signals f\n",
+                       g->analyser->tokeniser->file, p->line_number);
+                return 0;
+            }
+            return -1;
+        }
+        default:
+            return -1;
+    }
+}
+
+// Return 0 for always f.
+// Return 1 for always t.
+// Return -1 for don't know (or can raise t or f).
+int check_possible_signals_list(struct generator * g,
+                                struct node * p, int call_depth) {
+    int r = 1;
+    while (p) {
+        int res = check_possible_signals(g, p, call_depth);
+        if (res == 0) return res;
+        if (res < 0) r = res;
+        p = p->right;
+    }
+    return r;
+}
+
 /* K_needed() tests to see if we really need to keep c. Not true when the
    command does not touch the cursor. This and repeat_score() could be
    elaborated almost indefinitely.
 */
 
-static int K_needed_(struct generator * g, struct node * p, int call_depth) {
+static int K_needed_(struct node * p, int call_depth) {
     while (p) {
         switch (p->type) {
             case c_atlimit:
@@ -424,6 +677,7 @@ static int K_needed_(struct generator * g, struct node * p, int call_depth) {
             case c_true:
             case c_false:
             case c_debug:
+            case c_functionend:
                 break;
 
             case c_call:
@@ -434,12 +688,12 @@ static int K_needed_(struct generator * g, struct node * p, int call_depth) {
                  * recurse until we run out of stack for pathological cases.
                  */
                 if (call_depth >= 100) return true;
-                if (K_needed_(g, p->name->definition, call_depth + 1))
+                if (K_needed_(p->name->definition, call_depth + 1))
                     return true;
                 break;
 
             case c_bra:
-                if (K_needed_(g, p->left, call_depth)) return true;
+                if (K_needed_(p->left, call_depth)) return true;
                 break;
 
             default: return true;
@@ -450,7 +704,8 @@ static int K_needed_(struct generator * g, struct node * p, int call_depth) {
 }
 
 extern int K_needed(struct generator * g, struct node * p) {
-    return K_needed_(g, p, 0);
+    (void)g;
+    return K_needed_(p, 0);
 }
 
 static int repeat_score(struct generator * g, struct node * p, int call_depth) {
@@ -473,6 +728,7 @@ static int repeat_score(struct generator * g, struct node * p, int call_depth) {
             case c_le:
             case c_sliceto:   /* case c_not: must not be included here! */
             case c_debug:
+            case c_functionend:
                 break;
 
             case c_call:
@@ -769,9 +1025,7 @@ static void generate_GO(struct generator * g, struct node * p, int style) {
 #ifdef OPTIMISATION_WARNINGS
         printf("Optimising %s %s\n", style ? "goto" : "gopast", p->left->type == c_non ? "non" : "grouping");
 #endif
-        if (g->options->comments) {
-            writef(g, "~M~C", p);
-        }
+        writef(g, "~M~C", p);
         generate_GO_grouping(g, p->left, style, p->left->type == c_non);
         return;
     }
@@ -1012,6 +1266,7 @@ static void generate_setlimit(struct generator * g, struct node * p) {
          * restore c.
          */
         struct node * q = p->left;
+        assert(q->right == NULL);
 
         ++g->keep_count;
         writef(g, "~N~{int mlimit", p);
@@ -1098,29 +1353,57 @@ static void generate_integer_assign(struct generator * g, struct node * p, char 
     w(g, "~M~V0 ~S0 "); generate_AE(g, p->AE); writef(g, ";~C", p);
 }
 
-static void generate_integer_test(struct generator * g, struct node * p, char * s) {
+static void generate_integer_test(struct generator * g, struct node * p) {
 
-    w(g, "~Mif (!(");
+    int relop = p->type;
+    int optimise_to_return = (g->failure_label == x_return && p->right && p->right->type == c_functionend);
+    if (optimise_to_return) {
+        w(g, "~Mreturn ");
+        p->right = NULL;
+    } else {
+        w(g, "~Mif (");
+        // We want the inverse of the snowball test here.
+	relop ^= 1;
+    }
     generate_AE(g, p->left);
-    write_char(g, ' ');
-    write_string(g, s);
-    write_char(g, ' ');
+    write_c_relop(g, relop);
     generate_AE(g, p->AE);
-    writef(g, ")) ~f~C", p);
+    if (optimise_to_return) {
+        w(g, ";~C");
+    } else {
+        writef(g, ") ~f~C", p);
+    }
 }
 
 static void generate_call(struct generator * g, struct node * p) {
 
+    int signals = check_possible_signals_list(g, p->name->definition, 0);
     g->V[0] = p->name;
+    if (g->failure_keep_count == 0 && g->failure_label == x_return &&
+        (signals == 0 || (p->right && p->right->type == c_functionend))) {
+        /* Always fails or tail call. */
+        writef(g, "~Mreturn ~V0(z);~C", p);
+        return;
+    }
     writef(g, "~{int ret = ~V0(z);~C", p);
     if (g->failure_keep_count == 0 && g->failure_label == x_return) {
         /* Combine the two tests in this special case for better optimisation
          * and clearer generated code. */
-        writef(g, "~Mif (ret <= 0) return ret;~N~}", p);
+        writef(g, "~Mif (ret <= 0) return ret;~N", p);
     } else {
-        writef(g, "~Mif (ret == 0) ~f~N"
-              "~Mif (ret < 0) return ret;~N~}", p);
+        if (signals == 1) {
+            /* Always succeeds - just need to handle runtime errors. */
+            writef(g, "~Mif (ret < 0) return ret;~N", p);
+        } else if (signals == 0) {
+            /* Always fails. */
+            writef(g, "~Mif (ret < 0) return ret;~N", p);
+            writef(g, "~M~f~N", p);
+        } else {
+            writef(g, "~Mif (ret == 0) ~f~N", p);
+            writef(g, "~Mif (ret < 0) return ret;~N", p);
+        }
     }
+    writef(g, "~}", p);
 }
 
 static void generate_grouping(struct generator * g, struct node * p, int complement) {
@@ -1188,8 +1471,20 @@ static void generate_define(struct generator * g, struct node * p) {
     g->failure_label = x_return;
     g->label_used = 0;
     g->keep_count = 0;
+    int signals = check_possible_signals_list(g, p->left, 0);
     generate(g, p->left);
-    w(g, "~Mreturn 1;~N~}");
+    if (p->left->right) {
+        assert(p->left->right->type == c_functionend);
+        if (signals) {
+            generate(g, p->left->right);
+        }
+    }
+    w(g, "~}");
+}
+
+static void generate_functionend(struct generator * g, struct node * p) {
+    (void)p;
+    w(g, "~Mreturn 1;~N");
 }
 
 static void generate_substring(struct generator * g, struct node * p) {
@@ -1327,8 +1622,6 @@ static void generate_among(struct generator * g, struct node * p) {
 
     if (x->substring == 0) generate_substring(g, p);
 
-    if (x->starter != 0) generate(g, x->starter);
-
     if (x->command_count == 1 && x->nocommand_count == 0) {
         /* Only one outcome ("no match" already handled). */
         generate(g, x->commands[0]);
@@ -1412,12 +1705,14 @@ static void generate(struct generator * g, struct node * p) {
         case c_minusassign:   generate_integer_assign(g, p, "-="); break;
         case c_multiplyassign:generate_integer_assign(g, p, "*="); break;
         case c_divideassign:  generate_integer_assign(g, p, "/="); break;
-        case c_eq:            generate_integer_test(g, p, "=="); break;
-        case c_ne:            generate_integer_test(g, p, "!="); break;
-        case c_gr:            generate_integer_test(g, p, ">"); break;
-        case c_ge:            generate_integer_test(g, p, ">="); break;
-        case c_ls:            generate_integer_test(g, p, "<"); break;
-        case c_le:            generate_integer_test(g, p, "<="); break;
+        case c_eq:
+        case c_ne:
+        case c_gr:
+        case c_ge:
+        case c_ls:
+        case c_le:
+            generate_integer_test(g, p);
+            break;
         case c_call:          generate_call(g, p); break;
         case c_grouping:      generate_grouping(g, p, false); break;
         case c_non:           generate_grouping(g, p, true); break;
@@ -1429,6 +1724,7 @@ static void generate(struct generator * g, struct node * p) {
         case c_false:         generate_false(g, p); break;
         case c_true:          break;
         case c_debug:         generate_debug(g, p); break;
+        case c_functionend:   generate_functionend(g, p); break;
         default: fprintf(stderr, "%d encountered\n", p->type);
                  exit(1);
     }
@@ -1629,9 +1925,9 @@ static void generate_header_file(struct generator * g) {
                     int count = q->count;
                     if (count < 0) {
                         /* Unused variables should get removed from `names`. */
-                        fprintf(stderr, "Optimised out variable ");
-                        report_b(stderr, q->b);
-                        fprintf(stderr, " still in names list\n");
+                        q->s[SIZE(q->s)] = 0;
+                        fprintf(stderr, "Optimised out variable %s still in names list\n",
+                                q->s);
                         exit(1);
                     }
                     if (q->type == t_boolean) {
@@ -1643,7 +1939,7 @@ static void generate_header_file(struct generator * g) {
                     g->I[0] = count;
                     g->I[1] = "SIIrxg"[q->type];
                     w(g, "#define ~S0");
-                    write_b(g, q->b);
+                    write_s(g, q->s);
                     w(g, " (~c1[~I0])~N");
                 }
                 break;
@@ -1725,6 +2021,12 @@ extern void write_char(struct generator * g, int ch) {
 }
 
 extern void write_newline(struct generator * g) {
+    /* Avoid generating trailing whitespace. */
+    while (true) {
+        int ch = str_back(g->outbuf);
+        if (ch != ' ' && ch != '\t') break;
+        str_pop(g->outbuf);
+    }
     str_append_ch(g->outbuf, '\n'); /* newline */
     g->line_count++;
 }
@@ -1737,9 +2039,9 @@ extern void write_int(struct generator * g, int i) {
     str_append_int(g->outbuf, i);
 }
 
-extern void write_b(struct generator * g, symbol * b) {
+extern void write_s(struct generator * g, const byte * s) {
 
-    str_append_b(g->outbuf, b);
+    str_append_s(g->outbuf, s);
 }
 
 extern void write_str(struct generator * g, struct str * str) {

@@ -84,8 +84,7 @@ COMPILER_SOURCES = compiler/space.c \
 		   compiler/generator_ada.c
 
 COMPILER_HEADERS = compiler/header.h \
-		   compiler/syswords.h \
-		   compiler/syswords2.h
+		   compiler/syswords.h
 
 RUNTIME_SOURCES  = runtime/api.c \
 		   runtime/utilities.c
@@ -621,9 +620,13 @@ check_js: $(JS_SOURCES) $(libstemmer_algorithms:%=check_js_%)
 # Keep one in $(THIN_FACTOR) entries from gzipped vocabularies.
 THIN_FACTOR ?= 3
 
+ifneq (1,$(THIN_FACTOR))
+ifneq (,$(THIN_FACTOR))
 # Command to thin out the testdata.  Used for Python tests, which otherwise
 # take a long time (unless you use pypy).
-THIN_TEST_DATA := awk '(FNR % $(THIN_FACTOR) == 0){print}'
+THIN_TEST_DATA := |awk '(FNR % $(THIN_FACTOR) == 0){print}'
+endif
+endif
 
 check_rust: $(RUST_SOURCES) $(libstemmer_algorithms:%=check_rust_%)
 
@@ -682,16 +685,16 @@ check_js_%: $(STEMMING_DATA)/%
 check_python: check_python_stemwords $(libstemmer_algorithms:%=check_python_%)
 
 check_python_%: $(STEMMING_DATA_ABS)/%
-	@echo "Checking output of `echo $<|sed 's!.*/!!'` stemmer for Python"
+	@echo "Checking output of `echo $<|sed 's!.*/!!'` stemmer for Python (THIN_FACTOR=$(THIN_FACTOR))"
 	@cd python_check && if test -f '$</voc.txt.gz' ; then \
-	  gzip -dc '$</voc.txt.gz'|$(THIN_TEST_DATA) > tmp.in; \
+	  gzip -dc '$</voc.txt.gz' $(THIN_TEST_DATA) > tmp.in; \
 	  $(python) stemwords.py -c utf8 -l `echo $<|sed 's!.*/!!'` -i tmp.in -o $(PWD)/tmp.txt; \
 	  rm tmp.in; \
 	else \
 	  $(python) stemwords.py -c utf8 -l `echo $<|sed 's!.*/!!'` -i $</voc.txt -o $(PWD)/tmp.txt; \
 	fi
 	@if test -f '$</output.txt.gz' ; then \
-	  gzip -dc '$</output.txt.gz'|$(THIN_TEST_DATA)|$(DIFF) -u - tmp.txt; \
+	  gzip -dc '$</output.txt.gz' $(THIN_TEST_DATA)|$(DIFF) -u - tmp.txt; \
 	else \
 	  $(DIFF) -u $</output.txt tmp.txt; \
 	fi
