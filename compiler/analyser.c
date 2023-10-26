@@ -331,9 +331,9 @@ static int read_AE_test(struct analyser * a) {
         case c_divideassign:
         case c_eq:
         case c_ne:
-        case c_gr:
+        case c_gt:
         case c_ge:
-        case c_ls:
+        case c_lt:
         case c_le: return t->token;
         default: error(a, e_unexpected_token); t->token_held = true; return c_eq;
     }
@@ -759,6 +759,7 @@ static struct node * make_among(struct analyser * a, struct node * p, struct nod
     x->function_count = 0;
     x->nocommand_count = 0;
     x->amongvar_needed = false;
+    x->always_matches = false;
 
     if (q->type == c_bra) { starter = q; q = q->right; }
 
@@ -778,7 +779,12 @@ static struct node * make_among(struct analyser * a, struct node * p, struct nod
                 check_routine_mode(a, function, direction);
                 x->function_count++;
             } else {
-                w1->function = 0;
+                w1->function = NULL;
+                if (w1->size == 0) {
+                    // This among contains the empty string without a gating
+                    // function so it will always match.
+                    x->always_matches = true;
+                }
             }
             w1++;
         } else if (q->left == 0) {
@@ -1115,9 +1121,9 @@ static struct node * read_C(struct analyser * a) {
                         /* FALLTHRU */
                     case c_eq:
                     case c_ne:
-                    case c_gr:
+                    case c_gt:
                     case c_ge:
-                    case c_ls:
+                    case c_lt:
                     case c_le: {
                         struct node * lhs = n;
                         struct node * rhs = read_AE(a, 0, 0);
@@ -1131,13 +1137,13 @@ static struct node * read_C(struct analyser * a) {
                                 case c_ne:
                                     result = (lhs->number != rhs->number);
                                     break;
-                                case c_gr:
+                                case c_gt:
                                     result = (lhs->number > rhs->number);
                                     break;
                                 case c_ge:
                                     result = (lhs->number >= rhs->number);
                                     break;
-                                case c_ls:
+                                case c_lt:
                                     result = (lhs->number < rhs->number);
                                     break;
                                 case c_le:
@@ -1199,9 +1205,9 @@ static struct node * read_C(struct analyser * a) {
                     switch (p->type) {
                         case c_eq:
                         case c_ne:
-                        case c_gr:
+                        case c_gt:
                         case c_ge:
-                        case c_ls:
+                        case c_lt:
                         case c_le:
                             p->left = new_node(a, c_name);
                             p->left->name = q;
@@ -1325,7 +1331,13 @@ static void read_define_grouping(struct analyser * a, struct name * q) {
         NEW(grouping, p);
         if (a->groupings == 0) a->groupings = p; else a->groupings_end->next = p;
         a->groupings_end = p;
-        if (q) q->grouping = p;
+        if (q) {
+            if (q->grouping != 0) {
+                error(a, e_redefined);
+                FREE(q->grouping);
+            }
+            q->grouping = p;
+        }
         p->next = 0;
         p->name = q;
         p->line_number = a->tokeniser->line_number;

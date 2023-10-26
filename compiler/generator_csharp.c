@@ -959,7 +959,7 @@ static void generate_integer_test(struct generator * g, struct node * p) {
 
 static void generate_call(struct generator * g, struct node * p) {
 
-    int signals = check_possible_signals_list(g, p->name->definition, 0);
+    int signals = check_possible_signals_list(g, p->name->definition, c_define, 0);
     write_comment(g, p);
     g->V[0] = p->name;
     if (g->failure_keep_count == 0 && g->failure_label == x_return &&
@@ -1032,7 +1032,7 @@ static void generate_define(struct generator * g, struct node * p) {
     g->failure_label = x_return;
     g->label_used = 0;
     g->keep_count = 0;
-    int signals = check_possible_signals_list(g, p->left, 0);
+    int signals = check_possible_signals_list(g, p->left, c_define, 0);
     generate(g, p->left);
     if (p->left->right) {
         assert(p->left->right->type == c_functionend);
@@ -1061,11 +1061,15 @@ static void generate_substring(struct generator * g, struct node * p) {
     g->S[0] = p->mode == m_forward ? "" : "_b";
     g->I[0] = x->number;
 
-    if (!x->amongvar_needed) {
-        write_failure_if(g, "find_among~S0(a_~I0) == 0", p);
-    } else {
+    if (x->amongvar_needed) {
         writef(g, "~Mamong_var = find_among~S0(a_~I0);~N", p);
-        write_failure_if(g, "among_var == 0", p);
+        if (!x->always_matches) {
+            write_failure_if(g, "among_var == 0", p);
+        }
+    } else if (x->always_matches) {
+        writef(g, "~Mfind_among~S0(a_~I0);~N", p);
+    } else {
+        write_failure_if(g, "find_among~S0(a_~I0) == 0", p);
     }
 }
 
@@ -1162,9 +1166,9 @@ static void generate(struct generator * g, struct node * p) {
         case c_divideassign:  generate_integer_assign(g, p, "/="); break;
         case c_eq:
         case c_ne:
-        case c_gr:
+        case c_gt:
         case c_ge:
-        case c_ls:
+        case c_lt:
         case c_le:
             generate_integer_test(g, p);
             break;

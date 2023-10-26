@@ -97,8 +97,8 @@ enum token_codes {
     /* The relational operator token values are chosen such that we can
      * invert the relation with a simple xor with 1.
      */
-    c_gr = 0, c_le,
-    c_ge, c_ls,
+    c_gt = 0, c_le,
+    c_ge, c_lt,
     c_eq, c_ne,
 
     /* Other token values just need to be unique. */
@@ -241,6 +241,7 @@ struct among {
     int nocommand_count;      /* number of "no command" entries in this among */
     int function_count;       /* in this among */
     int amongvar_needed;      /* do we need to set among_var? */
+    int always_matches;       /* will this among always match? */
     struct node * substring;  /* i.e. substring ... among ( ... ) */
     struct node ** commands;  /* array with command_count entries */
 };
@@ -384,6 +385,7 @@ struct options {
     FILE * output_h;
     byte syntax_tree;
     byte comments;
+    byte js_esm;
     enc encoding;
     enum { LANG_JAVA, LANG_C, LANG_CPLUSPLUS, LANG_CSHARP, LANG_PASCAL, LANG_PYTHON, LANG_JAVASCRIPT, LANG_RUST, LANG_GO, LANG_ADA } make_lang;
     const char * externals_prefix;
@@ -421,7 +423,9 @@ extern void write_start_comment(struct generator * g,
 extern int K_needed(struct generator * g, struct node * p);
 extern int repeat_restore(struct generator * g, struct node * p);
 extern int check_possible_signals_list(struct generator * g,
-                                       struct node * p, int call_depth);
+                                       struct node * p,
+                                       int type,
+                                       int call_depth);
 
 /* Generator for C code. */
 extern void generate_program_c(struct generator * g);

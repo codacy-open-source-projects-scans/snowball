@@ -105,9 +105,9 @@ static void write_relop(struct generator * g, int relop) {
     switch (relop) {
 	case c_eq: write_string(g, " = "); break;
 	case c_ne: write_string(g, " <> "); break;
-	case c_gr: write_string(g, " > "); break;
+	case c_gt: write_string(g, " > "); break;
 	case c_ge: write_string(g, " >= "); break;
-	case c_ls: write_string(g, " < "); break;
+	case c_lt: write_string(g, " < "); break;
 	case c_le: write_string(g, " <= "); break;
 	default:
 	    fprintf(stderr, "Unexpected type #%d in generate_integer_test\n", relop);
@@ -914,7 +914,6 @@ static void generate_dollar(struct generator * g, struct node * p) {
     write_declare(g, "~B0_Ket : Integer", p);
     writef(g, "~{"
               "~M~B0_Current := FCurrent;~N"
-              "{ ~M~B0_Current := Copy(FCurrent, 1, FLimit); }~N"
               "~M~B0_Cursor := FCursor;~N"
               "~M~B0_Limit := FLimit;~N"
               "~M~B0_BkLimit := FBkLimit;~N"
@@ -975,7 +974,7 @@ static void generate_integer_test(struct generator * g, struct node * p) {
 
 static void generate_call(struct generator * g, struct node * p) {
 
-    int signals = check_possible_signals_list(g, p->name->definition, 0);
+    int signals = check_possible_signals_list(g, p->name->definition, c_define, 0);
     write_comment(g, p);
     g->V[0] = p->name;
     if (g->failure_keep_count == 0 && g->failure_label == x_return) {
@@ -1051,7 +1050,7 @@ static void generate_define(struct generator * g, struct node * p) {
     str_clear(g->failure_str);
     g->failure_label = x_return;
     g->unreachable = false;
-    int signals = check_possible_signals_list(g, p->left, 0);
+    int signals = check_possible_signals_list(g, p->left, c_define, 0);
 
     /* Generate function body. */
     w(g, "~{");
@@ -1111,11 +1110,15 @@ static void generate_substring(struct generator * g, struct node * p) {
     g->I[0] = x->number;
     g->I[1] = x->literalstring_count;
 
-    if (!x->amongvar_needed) {
-        write_failure_if(g, "FindAmong~S0(a_~I0, ~I1) = 0", p);
-    } else {
+    if (x->amongvar_needed) {
         writef(g, "~MAmongVar := FindAmong~S0(a_~I0, ~I1);~N", p);
-        write_failure_if(g, "AmongVar = 0", p);
+        if (!x->always_matches) {
+            write_failure_if(g, "AmongVar = 0", p);
+        }
+    } else if (x->always_matches) {
+        writef(g, "~MFindAmong~S0(a_~I0, ~I1);~N", p);
+    } else {
+        write_failure_if(g, "FindAmong~S0(a_~I0, ~I1) = 0", p);
     }
 }
 
@@ -1218,9 +1221,9 @@ static void generate(struct generator * g, struct node * p) {
         case c_divideassign:  generate_integer_assign(g, p, "div"); break;
         case c_eq:
         case c_ne:
-        case c_gr:
+        case c_gt:
         case c_ge:
-        case c_ls:
+        case c_lt:
         case c_le:
             generate_integer_test(g, p);
             break;

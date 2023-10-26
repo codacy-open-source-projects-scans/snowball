@@ -135,9 +135,9 @@ extern void write_c_relop(struct generator * g, int relop) {
     switch (relop) {
 	case c_eq: write_string(g, " == "); break;
 	case c_ne: write_string(g, " != "); break;
-	case c_gr: write_string(g, " > "); break;
+	case c_gt: write_string(g, " > "); break;
 	case c_ge: write_string(g, " >= "); break;
-	case c_ls: write_string(g, " < "); break;
+	case c_lt: write_string(g, " < "); break;
 	case c_le: write_string(g, " <= "); break;
 	default:
 	    fprintf(stderr, "Unexpected type #%d in generate_integer_test\n", relop);
@@ -162,9 +162,9 @@ void write_comment_content(struct generator * g, struct node * p) {
             break;
         case c_eq:
         case c_ne:
-        case c_gr:
+        case c_gt:
         case c_ge:
-        case c_ls:
+        case c_lt:
         case c_le:
             write_string(g, "$(<integer expression> ");
             write_string(g, name_of_token(p->type));
@@ -466,40 +466,10 @@ static int check_possible_signals(struct generator * g,
                 return res2;
             return res;
         }
-        case c_and: {
-            /* Gives same signal as p->left, but we want to warn. */
-            struct node * q;
-            int and_always_t = true;
-            for (q = p->left; q; q = q->right) {
-                // Just check this node - q->right is a separate clause of
-                // the AND.
-                int res = check_possible_signals(g, q, call_depth);
-                if (res == 0) {
-                    // If any clause of the AND always signals f, then the AND
-                    // always signals f.
-                    if (q->right) {
-                        fprintf(stderr, "%s:%d: warning: command always signals f here so rest of 'and' is dead code\n",
-                                g->analyser->tokeniser->file, q->line_number);
-                        q->right = NULL;
-                    }
-                    return 1;
-                }
-                if (res < 0) {
-                    and_always_t = false;
-                }
-            }
-            if (and_always_t) {
-                // If every clause of the AND always signals t, then the AND
-                // always signals t.
-                fprintf(stderr, "%s:%d: warning: every command in this 'and' always signals t\n",
-                       g->analyser->tokeniser->file, p->line_number);
-                return 1;
-            }
-            return -1;
-        }
+        case c_and:
         case c_bra:
-            /* Gives same signal as p->left. */
-            return check_possible_signals_list(g, p->left, call_depth);
+            /* Gives same signal as list p->left. */
+            return check_possible_signals_list(g, p->left, p->type, call_depth);
         case c_atleast:
         case c_backwards:
         case c_loop:
@@ -518,7 +488,7 @@ static int check_possible_signals(struct generator * g,
                  */
                 return -1;
             }
-            return check_possible_signals_list(g, p->name->definition,
+            return check_possible_signals_list(g, p->name->definition, c_define,
                                                call_depth + 1);
         case c_gopast:
         case c_goto:
@@ -533,9 +503,9 @@ static int check_possible_signals(struct generator * g,
         case c_next:
         case c_eq:
         case c_ne:
-        case c_gr:
+        case c_gt:
         case c_ge:
-        case c_ls:
+        case c_lt:
         case c_le:
         case c_grouping:
         case c_non:
@@ -544,12 +514,7 @@ static int check_possible_signals(struct generator * g,
             return -1;
         case c_substring: {
             struct among * x = p->among;
-
-            if (x->literalstring_count > 0 &&
-                x->b[0].size == 0 &&
-                x->b[0].function == NULL) {
-                /* This substring can't fail since its among contains the empty
-                 * string without a gating function. */
+            if (x->always_matches) {
                 return 1;
             }
             return -1;
@@ -559,11 +524,7 @@ static int check_possible_signals(struct generator * g,
             int r = 1;
 
             if (x->substring == 0) {
-                if (x->literalstring_count > 0 &&
-                    x->b[0].size == 0 &&
-                    x->b[0].function == NULL) {
-                    /* The implicit substring can't fail since its among
-                     * contains the empty string without a gating function. */
+                if (x->always_matches) {
                     return 1;
                 }
                 r = -1;
@@ -598,7 +559,7 @@ static int check_possible_signals(struct generator * g,
         }
         case c_or: {
             struct node * q;
-            int or_always_f = true;
+            int r = 0;
             for (q = p->left; q; q = q->right) {
                 // Just check this node - q->right is a separate clause of
                 // the OR.
@@ -614,17 +575,10 @@ static int check_possible_signals(struct generator * g,
                     return 1;
                 }
                 if (res < 0) {
-                    or_always_f = false;
+                    r = res;
                 }
             }
-            if (or_always_f) {
-                // If every clause of the OR always signals f, then the OR
-                // always signals f.
-                fprintf(stderr, "%s:%d: warning: every command in this 'or' always signals f\n",
-                       g->analyser->tokeniser->file, p->line_number);
-                return 0;
-            }
-            return -1;
+            return r;
         }
         default:
             return -1;
@@ -634,12 +588,21 @@ static int check_possible_signals(struct generator * g,
 // Return 0 for always f.
 // Return 1 for always t.
 // Return -1 for don't know (or can raise t or f).
-int check_possible_signals_list(struct generator * g,
-                                struct node * p, int call_depth) {
+int check_possible_signals_list(struct generator * g, struct node * p,
+                                int type, int call_depth) {
     int r = 1;
     while (p) {
         int res = check_possible_signals(g, p, call_depth);
-        if (res == 0) return res;
+        if (res == 0) {
+            // If any command always signals f, then the list always signals f.
+            if (p->right) {
+                fprintf(stderr, "%s:%d: warning: command always signals f here so rest of %s is dead code\n",
+                        g->analyser->tokeniser->file, p->line_number,
+                        (type == c_and ? "'and'" : "command list"));
+                p->right = NULL;
+            }
+            return res;
+        }
         if (res < 0) r = res;
         p = p->right;
     }
@@ -666,9 +629,9 @@ static int K_needed_(struct node * p, int call_depth) {
             case c_divideassign:
             case c_eq:
             case c_ne:
-            case c_gr:
+            case c_gt:
             case c_ge:
-            case c_ls:
+            case c_lt:
             case c_le:
             case c_sliceto:
             case c_booltest:
@@ -722,9 +685,9 @@ static int repeat_score(struct generator * g, struct node * p, int call_depth) {
             case c_divideassign:
             case c_eq:
             case c_ne:
-            case c_gr:
+            case c_gt:
             case c_ge:
-            case c_ls:
+            case c_lt:
             case c_le:
             case c_sliceto:   /* case c_not: must not be included here! */
             case c_debug:
@@ -1377,7 +1340,7 @@ static void generate_integer_test(struct generator * g, struct node * p) {
 
 static void generate_call(struct generator * g, struct node * p) {
 
-    int signals = check_possible_signals_list(g, p->name->definition, 0);
+    int signals = check_possible_signals_list(g, p->name->definition, c_define, 0);
     g->V[0] = p->name;
     if (g->failure_keep_count == 0 && g->failure_label == x_return &&
         (signals == 0 || (p->right && p->right->type == c_functionend))) {
@@ -1471,7 +1434,7 @@ static void generate_define(struct generator * g, struct node * p) {
     g->failure_label = x_return;
     g->label_used = 0;
     g->keep_count = 0;
-    int signals = check_possible_signals_list(g, p->left, 0);
+    int signals = check_possible_signals_list(g, p->left, c_define, 0);
     generate(g, p->left);
     if (p->left->right) {
         assert(p->left->right->type == c_functionend);
@@ -1606,13 +1569,18 @@ static void generate_substring(struct generator * g, struct node * p) {
 #endif
     }
 
-    if (!x->amongvar_needed) {
-        writef(g, "~Mif (!(find_among~S0(z, a_~I0, ~I1))) ~f", p);
-        writef(g, shown_comment ? "~N" : "~C", p);
-    } else {
+    if (x->amongvar_needed) {
         writef(g, "~Mamong_var = find_among~S0(z, a_~I0, ~I1);", p);
         writef(g, shown_comment ? "~N" : "~C", p);
-        writef(g, "~Mif (!(among_var)) ~f~N", p);
+        if (!x->always_matches) {
+            writef(g, "~Mif (!among_var) ~f~N", p);
+        }
+    } else if (x->always_matches) {
+        writef(g, "~Mfind_among~S0(z, a_~I0, ~I1);", p);
+        writef(g, shown_comment ? "~N" : "~C", p);
+    } else {
+        writef(g, "~Mif (!find_among~S0(z, a_~I0, ~I1)) ~f", p);
+        writef(g, shown_comment ? "~N" : "~C", p);
     }
 }
 
@@ -1707,9 +1675,9 @@ static void generate(struct generator * g, struct node * p) {
         case c_divideassign:  generate_integer_assign(g, p, "/="); break;
         case c_eq:
         case c_ne:
-        case c_gr:
+        case c_gt:
         case c_ge:
-        case c_ls:
+        case c_lt:
         case c_le:
             generate_integer_test(g, p);
             break;

@@ -10,6 +10,7 @@ endif
 
 c_src_dir = src_c
 
+JAVACFLAGS ?=
 JAVAC ?= javac
 JAVA ?= java
 java_src_main_dir = java/org/tartarus/snowball
@@ -65,7 +66,7 @@ tarball_ext = .tar.gz
 # * KOI8_R_algorithms
 include algorithms.mk
 
-other_algorithms = german2 kraaij_pohlmann lovins
+other_algorithms = kraaij_pohlmann lovins
 
 all_algorithms = $(libstemmer_algorithms) $(other_algorithms)
 
@@ -150,7 +151,8 @@ CSHARP_SOURCES = $(libstemmer_algorithms:%=$(csharp_src_dir)/%Stemmer.generated.
 PASCAL_SOURCES = $(ISO_8859_1_algorithms:%=$(pascal_src_dir)/%Stemmer.pas)
 PYTHON_SOURCES = $(libstemmer_algorithms:%=$(python_output_dir)/%_stemmer.py) \
 		 $(python_output_dir)/__init__.py
-JS_SOURCES = $(libstemmer_algorithms:%=$(js_output_dir)/%-stemmer.js)
+JS_SOURCES = $(libstemmer_algorithms:%=$(js_output_dir)/%-stemmer.js) \
+	$(js_output_dir)/base-stemmer.js
 RUST_SOURCES = $(libstemmer_algorithms:%=$(rust_src_dir)/%_stemmer.rs)
 GO_SOURCES = $(libstemmer_algorithms:%=$(go_src_dir)/%_stemmer.go) \
 	$(go_src_main_dir)/stemwords/algorithms.go
@@ -169,7 +171,7 @@ C_OTHER_OBJECTS = $(C_OTHER_SOURCES:.c=.o)
 JAVA_CLASSES = $(JAVA_SOURCES:.java=.class)
 JAVA_RUNTIME_CLASSES=$(JAVARUNTIME_SOURCES:.java=.class)
 
-CFLAGS=-O2 -W -Wall -Wmissing-prototypes -Wmissing-declarations
+CFLAGS=-g -O2 -W -Wall -Wmissing-prototypes -Wmissing-declarations
 CPPFLAGS=
 
 INCLUDES=-Iinclude
@@ -342,6 +344,10 @@ $(js_output_dir)/%-stemmer.js: algorithms/%.sbl snowball$(EXEEXT)
 	echo "./snowball $< -js -o $${o}"; \
 	./snowball $< -js -o $${o}
 
+$(js_output_dir)/base-stemmer.js: $(js_runtime_dir)/base-stemmer.js
+	@mkdir -p $(js_output_dir)
+	cp $< $@
+
 $(ada_src_dir)/stemmer-%.ads: algorithms/%.sbl snowball
 	@mkdir -p $(ada_src_dir)
 	@l=`echo "$<" | sed 's!\(.*\)\.sbl$$!\1!;s!^.*/!!'`; \
@@ -384,6 +390,7 @@ dist_libstemmer_c: \
             $(LIBSTEMMER_EXTRA) \
 	    $(C_LIB_SOURCES) \
             $(C_LIB_HEADERS) \
+	    $(COMMON_FILES) \
             libstemmer/mkinc.mak \
             libstemmer/mkinc_utf8.mak
 	destname=libstemmer_c-$(SNOWBALL_VERSION); \
@@ -428,6 +435,7 @@ dist_libstemmer_c: \
 
 # Make a distribution of all the sources required to compile the Java library.
 dist_libstemmer_java: $(RUNTIME_SOURCES) $(RUNTIME_HEADERS) \
+	    $(COMMON_FILES) \
             $(LIBSTEMMER_EXTRA) \
 	    $(JAVA_SOURCES)
 	destname=libstemmer_java-$(SNOWBALL_VERSION); \
@@ -450,6 +458,7 @@ dist_libstemmer_java: $(RUNTIME_SOURCES) $(RUNTIME_HEADERS) \
 
 # Make a distribution of all the sources required to compile the C# library.
 dist_libstemmer_csharp: $(RUNTIME_SOURCES) $(RUNTIME_HEADERS) \
+	    $(COMMON_FILES) \
             $(LIBSTEMMER_EXTRA) \
 	    $(CSHARP_SOURCES)
 	destname=libstemmer_csharp-$(SNOWBALL_VERSION); \
@@ -468,7 +477,7 @@ dist_libstemmer_csharp: $(RUNTIME_SOURCES) $(RUNTIME_HEADERS) \
 	(cd dist && tar zcf $${destname}$(tarball_ext) $${destname}) && \
 	rm -rf $${dest}
 
-dist_libstemmer_python: $(PYTHON_SOURCES)
+dist_libstemmer_python: $(PYTHON_SOURCES) $(COMMON_FILES)
 	destname=snowballstemmer-$(SNOWBALL_VERSION); \
 	dest=dist/$${destname}; \
 	rm -rf $${dest} && \
@@ -485,7 +494,7 @@ dist_libstemmer_python: $(PYTHON_SOURCES)
 	(cd $${dest} && $(python) setup.py sdist bdist_wheel && cp dist/*.tar.gz dist/*.whl ..) && \
 	rm -rf $${dest}
 
-dist_libstemmer_js: $(JS_SOURCES)
+dist_libstemmer_js: $(JS_SOURCES) $(COMMON_FILES)
 	destname=jsstemmer-$(SNOWBALL_VERSION); \
 	dest=dist/$${destname}; \
 	rm -rf $${dest} && \
@@ -560,7 +569,7 @@ check_koi8r_%: $(STEMMING_DATA)/% stemwords$(EXEEXT)
 	@rm tmp.txt
 
 .java.class:
-	cd java && $(JAVAC) `echo "$<"|sed 's,^java/,,'`
+	cd java && $(JAVAC) $(JAVACFLAGS) `echo "$<"|sed 's,^java/,,'`
 
 check_java: $(JAVA_CLASSES) $(JAVA_RUNTIME_CLASSES)
 	$(MAKE) do_check_java
@@ -664,7 +673,7 @@ check_go_%: $(STEMMING_DATA_ABS)/%
 	fi
 	@rm tmp.txt
 
-export NODE_PATH = $(js_runtime_dir):$(js_output_dir)
+export NODE_PATH = $(js_output_dir)
 
 check_js_%: $(STEMMING_DATA)/%
 	@echo "Checking output of `echo $<|sed 's!.*/!!'` stemmer for JS"
