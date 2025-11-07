@@ -50,7 +50,7 @@ stem_file(struct sb_stemmer * stemmer, FILE * f_in, FILE * f_out)
                 const sb_symbol * stemmed = sb_stemmer_stem(stemmer, b, i);
                 if (stemmed == NULL)
                 {
-                    fprintf(stderr, "Out of memory");
+                    fprintf(stderr, "Out of memory or internal error\n");
                     exit(1);
                 }
 
@@ -97,7 +97,9 @@ usage(int n)
           "\n"
           "If -c is given, the argument is the character encoding of the input\n"
           "and output files.  If it is omitted, the UTF-8 encoding is used.\n"
-          "\n"
+          "\n",
+          progname);
+    printf(
           "If -p is given the output file consists of each word of the input\n"
           "file followed by \"->\" followed by its stemmed equivalent.\n"
           "If -p2 is given the output file is a two column layout containing\n"
@@ -106,8 +108,7 @@ usage(int n)
           "Otherwise, the output file consists of the stemmed words, one per\n"
           "line.\n"
           "\n"
-          "-h displays this help\n",
-          progname);
+          "-h displays this help\n");
     exit(n);
 }
 
