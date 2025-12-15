@@ -230,7 +230,7 @@ static void writef(struct generator * g, const char * input, struct node * p) {
                 continue;
             case '+': g->margin++; continue;
             case '-': g->margin--; continue;
-            case 'n': write_string(g, g->options->name); continue;
+            case 'n': write_s(g, g->options->name); continue;
             default:
                 printf("Invalid escape sequence ~%c in writef(g, \"%s\", p)\n",
                        ch, input);
@@ -1030,9 +1030,7 @@ static void generate_literalstring(struct generator * g, struct node * p) {
 }
 
 static void generate_setup_context(struct generator * g) {
-    if (!g->analyser->name_count[t_string] &&
-        !g->analyser->name_count[t_integer] &&
-        !g->analyser->name_count[t_boolean]) {
+    if (g->analyser->variable_count == 0) {
         w(g, "~Mvar context = &Context{}~N");
         w(g, "~M_ = context~N");
         return;
@@ -1309,12 +1307,12 @@ static void generate(struct generator * g, struct node * p) {
 
 static void generate_class_begin(struct generator * g) {
     w(g, "package ");
-    w(g, g->options->package);
+    write_string(g, g->options->package);
     w(g, "~N~N");
 
     w(g, "import (~N");
     w(g, "~+~MsnowballRuntime \"");
-    w(g, g->options->go_snowball_runtime);
+    write_string(g, g->options->go_snowball_runtime);
     w(g, "\"~N~-)~N~N");
 }
 

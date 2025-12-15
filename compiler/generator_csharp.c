@@ -243,7 +243,7 @@ continue_outer_loop:
                 continue;
             case '+': g->margin++; continue;
             case '-': g->margin--; continue;
-            case 'n': write_string(g, g->options->name); continue;
+            case 'n': write_s(g, g->options->name); continue;
             default:
                 printf("Invalid escape sequence ~%c in writef(g, \"%s\", p)\n",
                        ch, input);
@@ -1305,7 +1305,7 @@ static void generate_class_begin(struct generator * g) {
     w(g, "#pragma warning disable 0162~N~N");
 
     w(g, "~Mnamespace ");
-    w(g, g->options->package);
+    write_string(g, g->options->package);
     w(g, "~N~{");
 
     w(g, "~Musing System;~N");
@@ -1321,7 +1321,7 @@ static void generate_class_begin(struct generator * g) {
     w(g, "~M/// ~N");
     w(g, "~M[System.CodeDom.Compiler.GeneratedCode(\"Snowball\", \"" SNOWBALL_VERSION "\")]~N");
     w(g, "~Mpublic partial class ~n : ");
-    w(g, g->options->parent_class_name);
+    write_string(g, g->options->parent_class_name);
     w(g, "~N~{");
 }
 

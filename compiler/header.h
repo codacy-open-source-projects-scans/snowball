@@ -18,8 +18,10 @@ typedef unsigned short symbol;
 // Similar to NEW() but allocates an array of N objects of type `struct TYPE *`.
 #define NEWVEC(TYPE, V, N) struct TYPE * V = (struct TYPE *) MALLOC(sizeof(struct TYPE) * (N))
 
-#define SIZE(p)     ((int *)(p))[-1]
-#define CAPACITY(p) ((int *)(p))[-2]
+#define SIZE(p)            ((const int *)(p))[-1]
+#define SET_SIZE(p, n)     ((int *)(p))[-1] = (n)
+#define ADD_TO_SIZE(p, n)  ((int *)(p))[-1] += (n)
+#define CAPACITY(p)        ((int *)(p))[-2]
 
 extern symbol * create_b(int n);
 extern void report_b(FILE * out, const symbol * p);
@@ -33,16 +35,20 @@ extern symbol * add_symbol_to_b(symbol * p, symbol ch);
 // These routines are like those above but work in byte instead of symbol.
 
 extern byte * create_s(int n);
+extern byte * create_s_from_sz(const char * s);
+extern byte * create_s_from_data(const char * s, int n);
+
 extern void report_s(FILE * out, const byte * p);
 extern void lose_s(byte * p);
 extern byte * increase_capacity_s(byte * p, int n);
 extern byte * ensure_capacity_s(byte * p, int n);
 extern byte * copy_s(const byte * p);
-extern byte * add_s_to_s(byte * p, const char * s, int n);
+extern byte * add_s_to_s(byte * p, const byte * s);
+extern byte * add_slen_to_s(byte * p, const char * s, int n);
 extern byte * add_sz_to_s(byte * p, const char * s);
 extern byte * add_char_to_s(byte * p, char ch);
 // "" LIT is a trick to make compilation fail if LIT is not a string literal.
-#define add_literal_to_s(P, LIT) add_s_to_s(P, "" LIT, sizeof(LIT) - 1)
+#define add_literal_to_s(P, LIT) add_slen_to_s(P, "" LIT, sizeof(LIT) - 1)
 
 struct str; /* defined in space.c */
 
@@ -309,19 +315,6 @@ enum name_types {
 /*  If this list is extended, adjust write_varname in generator.c  */
 };
 
-/*  In name_count[i] below, remember that
-    type   is
-    ----+----
-      0 |  string
-      1 |  boolean
-      2 |  integer
-      3 |  routine
-      4 |  external
-      5 |  grouping
-
-    Only the C generator currently uses this, and only for the first 3 types.
-*/
-
 struct analyser {
     struct tokeniser * tokeniser;
     struct node * nodes;
@@ -331,7 +324,13 @@ struct analyser {
     byte modifyable;          /* false inside reverse(...) */
     struct node * program;
     struct node * program_end;
-    int name_count[t_size];   /* name_count[i] counts the number of names of type i */
+    /* name_count[i] counts the number of names of type i, where i is an enum
+     * name_types value.  These counts *EXCLUDE* localised variables and
+     * variables which optimised away (e.g. declared but never used).
+     */
+    int name_count[t_size];
+    /* name_count[t_string] + name_count[t_boolean] + name_count[t_integer] */
+    int variable_count;
     struct among * amongs;
     struct among * amongs_end;
     int among_with_function_count; /* number of amongs with functions */
@@ -403,8 +402,12 @@ enum special_labels {
 
 struct options {
     /* for the command line: */
-    const char * output_file;
-    char * name;
+    byte * output_file;
+    // output_file but without any path.
+    byte * output_leaf;
+    // Extension specified in -o option (or NULL if none).
+    byte * extension;
+    byte * name;
     FILE * output_src;
     FILE * output_h;
     byte syntax_tree;
@@ -426,6 +429,8 @@ struct options {
     } target_lang;
     const char * externals_prefix;
     const char * variables_prefix;
+    const char * cheader;
+    const char * hheader;
     const char * runtime_path;
     const char * parent_class_name;
     const char * package;

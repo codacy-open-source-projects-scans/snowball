@@ -205,7 +205,7 @@ static void read_names(struct analyser * a, int type) {
                  * its special meaning, for compatibility with older versions
                  * of snowball.
                  */
-                SIZE(t->s) = 0;
+                SET_SIZE(t->s, 0);
                 t->s = add_literal_to_s(t->s, "len");
                 goto handle_as_name;
             }
@@ -214,7 +214,7 @@ static void read_names(struct analyser * a, int type) {
                  * its special meaning, for compatibility with older versions
                  * of snowball.
                  */
-                SIZE(t->s) = 0;
+                SET_SIZE(t->s, 0);
                 t->s = add_literal_to_s(t->s, "lenof");
                 goto handle_as_name;
             }
@@ -1506,7 +1506,7 @@ static symbol * alter_grouping(symbol * p, symbol * q, int style, int utf8) {
             for (int i = 0; i < SIZE(p); i++) {
                 if (p[i] == W) {
                     memmove(p + i, p + i + 1, (SIZE(p) - i - 1) * sizeof(symbol));
-                    SIZE(p)--;
+                    ADD_TO_SIZE(p, -1);
                 }
             }
             j += width;
@@ -1540,7 +1540,7 @@ static int finalise_grouping(struct grouping * p) {
             ch = p->b[j++] = p->b[i];
         }
     }
-    SIZE(p->b) = j;
+    SET_SIZE(p->b, j);
     return true;
 }
 
@@ -2393,10 +2393,8 @@ extern void read_program(struct analyser * a, unsigned localise_mask) {
 
     /* We've now identified variables whose values are never used and
      * names which are unreachable, and cleared "used" for them, so go
-     * through and unlink the unused ones and number the others.  The
-     * numbers are used by the C generator.
+     * through and unlink the unused ones.
      */
-    int * name_count = a->name_count;
     struct name * n = a->names;
     struct name ** n_ptr = &(a->names);
     while (n) {
@@ -2415,7 +2413,6 @@ extern void read_program(struct analyser * a, unsigned localise_mask) {
             *n_ptr = n;
             continue;
         }
-        n->count = name_count[n->type]++;
         n_ptr = &(n->next);
         n = n->next;
     }
@@ -2543,6 +2540,9 @@ extern void read_program(struct analyser * a, unsigned localise_mask) {
             name->count = a->name_count[name->type]++;
         }
     }
+    a->variable_count = a->name_count[t_string] +
+                        a->name_count[t_boolean] +
+                        a->name_count[t_integer];
 }
 
 extern struct analyser * create_analyser(struct tokeniser * t) {

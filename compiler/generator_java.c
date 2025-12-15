@@ -225,7 +225,7 @@ static void writef(struct generator * g, const char * input, struct node * p) {
                 continue;
             case '+': g->margin++; continue;
             case '-': g->margin--; continue;
-            case 'n': write_string(g, g->options->name); continue;
+            case 'n': write_s(g, g->options->name); continue;
             default:
                 printf("Invalid escape sequence ~%c in writef(g, \"%s\", p)\n",
                        ch, input);
@@ -1291,7 +1291,7 @@ static void generate(struct generator * g, struct node * p) {
 
 static void generate_class_begin(struct generator * g) {
     w(g, "package ");
-    w(g, g->options->package);
+    write_string(g, g->options->package);
     w(g, ";~N~N");
 
     if (g->java_import_arrays) {
@@ -1300,7 +1300,7 @@ static void generate_class_begin(struct generator * g) {
 
     if (g->analyser->amongs) {
         w(g, "import ");
-        w(g, g->options->among_class);
+        write_string(g, g->options->among_class);
         w(g, ";~N~N");
     }
 
@@ -1323,7 +1323,7 @@ static void generate_class_begin(struct generator * g) {
          "@SuppressWarnings(\"unused\")~N"
          "public class ~n extends ");
 
-    w(g, g->options->parent_class_name);
+    write_string(g, g->options->parent_class_name);
     w(g, " {~+~N"
          "~N"
          "~Mprivate static final long serialVersionUID = 1L;~N");
@@ -1343,13 +1343,13 @@ static void generate_equals(struct generator * g) {
          "~M@Override~N"
          "~Mpublic boolean equals( Object o ) {~N"
          "~+~Mreturn o instanceof ");
-    w(g, g->options->name);
+    write_s(g, g->options->name);
     w(g, ";~N~-~M}~N"
          "~N"
          "~M@Override~N"
          "~Mpublic int hashCode() {~N"
          "~+~Mreturn ");
-    w(g, g->options->name);
+    write_s(g, g->options->name);
     w(g, ".class.getName().hashCode();~N"
          "~-~M}~N");
 }
