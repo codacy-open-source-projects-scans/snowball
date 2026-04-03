@@ -37,31 +37,23 @@ static void wi3(struct generator * g, int i) {
 /* Write routines for items from the syntax tree */
 
 static void write_varname(struct generator * g, struct name * p) {
-    switch (p->type) {
-        case t_external:
-            if (g->options->target_lang == LANG_CPLUSPLUS) {
-                write_string(g, g->options->package);
-                write_string(g, "::");
-                write_s(g, g->options->name);
-                write_string(g, "::");
-            } else if (g->options->externals_prefix) {
-                write_string(g, g->options->externals_prefix);
-            }
-            break;
-        case t_string:
-        case t_boolean:
-        case t_integer: {
-            /* Name variables using their Snowball name prefixed by
-             * s_, b_ or i_.
-             */
-            write_char(g, "sbi"[p->type]);
-            write_char(g, '_');
-            write_s(g, p->s);
-            return;
+    if (p->type == t_external) {
+        if (g->options->target_lang == LANG_CPLUSPLUS) {
+            write_string(g, g->options->package);
+            write_string(g, "::");
+            write_s(g, g->options->name);
+            write_string(g, "::");
+        } else if (g->options->externals_prefix) {
+            write_string(g, g->options->externals_prefix);
         }
-        default:
-            write_char(g, "SIIrxg"[p->type]);
-            write_char(g, '_');
+    } else {
+        /* Name variables using their Snowball name prefixed by s_, b_ or i_
+         * depending on their type.
+         *
+         * We use the same naming scheme for both global and local variables.
+         */
+        write_char(g, "sbirxg"[p->type]);
+        write_char(g, '_');
     }
     write_s(g, p->s);
 }
@@ -364,7 +356,6 @@ static void write_failure(struct generator * g) {
     }
     if (str_len(g->failure_str) != 0) write_string(g, " }");
 }
-
 
 /* if at limit fail */
 static void write_check_limit(struct generator * g, struct node * p) {
@@ -728,7 +719,6 @@ static int repeat_score(struct generator * g, struct node * p, int call_depth) {
 }
 
 /* tests if an expression requires cursor reinstatement in a repeat */
-
 extern int repeat_restore(struct generator * g, struct node * p) {
     return repeat_score(g, p, 0) >= 2;
 }
@@ -826,7 +816,6 @@ static void generate_backwards(struct generator * g, struct node * p) {
     w(g, "~Mz->c = z->lb;~N");
 }
 
-
 static void generate_not(struct generator * g, struct node * p) {
     struct str * savevar = NULL;
     if (K_needed(g, p->left)) {
@@ -866,7 +855,6 @@ static void generate_not(struct generator * g, struct node * p) {
         str_delete(savevar);
     }
 }
-
 
 static void generate_try(struct generator * g, struct node * p) {
     struct str * savevar = NULL;
@@ -921,7 +909,6 @@ static void generate_fail(struct generator * g, struct node * p) {
 }
 
 /* generate_test() also implements 'reverse' */
-
 static void generate_test(struct generator * g, struct node * p) {
     struct str * savevar = NULL;
     if (K_needed(g, p->left)) {
@@ -1085,12 +1072,6 @@ static void generate_repeat_or_atleast(struct generator * g, struct node * p, st
     g->label_used = 0;
     str_clear(g->failure_str);
 
-    int possible_signals = p->left->possible_signals;
-    if (possible_signals != -1) {
-        fprintf(stderr, "%s:%d: warning: body of '%s' always signals '%c'\n",
-                g->analyser->tokeniser->file, p->line_number,
-                loopvar ? "atleast" : "repeat", possible_signals ? 't' : 'f');
-    }
     generate(g, p->left);
 
     if (loopvar != NULL) {

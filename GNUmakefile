@@ -44,7 +44,8 @@ csharp_sample_dir = csharp/Stemwords
 
 # Dart
 
-DART ?= dart run --enable-asserts
+DART ?= dart
+DART_RUN_FLAGS ?= --enable-asserts
 dart_src_main_dir = dart/lib
 dart_src_dir = $(dart_src_main_dir)/ext
 dart_runtime_dir = dart/lib/src
@@ -340,12 +341,12 @@ everything: ada all csharp dart go java js pascal python rust zig
 
 baseline-create: everything
 	rm -rf *.baseline
-	for d in ada src_c csharp dart go java js_out pascal python_out rust ; do cp -a $$d $$d.baseline ; done
+	for d in ada src_c csharp dart go java js_out pascal python_out rust zig ; do cp -a $$d $$d.baseline ; done
 	rm -rf *.baseline/*.o ada.baseline/obj pascal.baseline/*.ppu
 	find java.baseline -name '*.class' -delete
 
 baseline-diff:
-	@for d in ada src_c csharp dart go java js_out pascal python_out rust ; do diff -ru -x'*.o' -x'obj' -x'*.ppu' -x'*.class' -x'Cargo.lock' -x 'target' $$d.baseline $$d ; done
+	@for d in ada src_c csharp dart go java js_out pascal python_out rust zig ; do diff -ru -x'*.o' -x'obj' -x'*.ppu' -x'*.class' -x'Cargo.lock' -x 'target' $$d.baseline $$d ; done
 
 .PHONY: all clean update_version everything baseline-create baseline-diff
 
@@ -850,7 +851,7 @@ dart: $(DART_SOURCES) dart/.dart_deps
 
 dart/.dart_deps: dart/pubspec.yaml
 	@echo "Fetching Dart package dependencies..."
-	@cd dart && dart pub get
+	@cd dart && $(DART) pub get
 	@touch $@
 
 check_dart: dart
@@ -862,10 +863,10 @@ check_dart_%: $(STEMMING_DATA_ABS)/%
 	@echo "Checking output of $* stemmer for Dart"
 	@cd dart && if test -f '$</voc.txt.gz' ; then \
 	  gzip -dc '$</voc.txt.gz' |\
-	    $(DART) example/test_app.dart $* -o $(PWD)/tmp.txt; \
+	    $(DART) run $(DART_RUN_FLAGS) example/test_app.dart $* -o $(PWD)/tmp.txt; \
 	  gzip -dc '$</output.txt.gz'|$(DIFF) -u - $(PWD)/tmp.txt; \
 	else \
-	  $(DART) example/test_app.dart $* $</voc.txt |\
+	  $(DART) run $(DART_RUN_FLAGS) example/test_app.dart $* $</voc.txt |\
 	      $(DIFF) -u $</output.txt - ;\
 	fi
 	@if test -f '$</voc.txt.gz' ; then rm tmp.txt ; fi
