@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <ctype.h>
 #include <limits.h>  /* for INT_MAX */
 #include <stdio.h>   /* printf etc */
 #include <stdlib.h>  /* exit */
@@ -220,6 +221,9 @@ static void read_names(struct analyser * a, int type) {
             }
             case c_name:
 handle_as_name:
+                if (token != c_name) {
+                    disable_token(t, token);
+                }
                 if (look_for_name(a) != NULL) {
                     report_error_location(a);
                     fprintf(stderr, "'%.*s' re-declared\n", SIZE(t->s), t->s);
@@ -235,11 +239,29 @@ handle_as_name:
                      */
                     p->count = -1;
                     p->declaration_line_number = t->line_number;
+                    // Check if any existing names of the same type differ
+                    // only by case - if we find one we set a flag so we know
+                    // to mangle this name for languages with case-insensitive
+                    // identifiers.  (Note that the first declared name of any
+                    // group of colliding names collision doesn't get this flag
+                    // set so won't get mangled.)
+                    for (struct name * q = a->names; q; q = q->next) {
+                        if (q->type != type) continue;
+                        byte * b = q->s;
+                        int n = SIZE(b);
+                        if (n != SIZE(p->s)) continue;
+                        for (int i = 0; i < n; ++i) {
+                            if (tolower(p->s[i]) != tolower(b[i]))
+                                goto next_name;
+                        }
+                        p->case_collision = true;
+                        goto done_case_check;
+
+next_name: ;
+                    }
+done_case_check:
                     p->next = a->names;
                     a->names = p;
-                    if (token != c_name) {
-                        disable_token(t, token);
-                    }
                 }
                 break;
             default:
@@ -2561,6 +2583,18 @@ extern void read_program(struct analyser * a, unsigned localise_mask) {
     a->variable_count = a->name_count[t_string] +
                         a->name_count[t_boolean] +
                         a->name_count[t_integer];
+
+    // Now number the locals (which e.g. Ada and Pascal use to avoid clashes
+    // from case-insensitive variable names).  We use a copy of the counters
+    // to do this so that a->name_count[] reflects the number of non-localised
+    // variables of each type.
+    int name_count[t_size];
+    memcpy(name_count, a->name_count, sizeof(name_count));
+    for (struct name * name = a->names; name; name = name->next) {
+        if (name->count < 0) {
+            name->count = name_count[name->type]++;
+        }
+    }
 }
 
 extern struct analyser * create_analyser(struct tokeniser * t) {

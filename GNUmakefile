@@ -152,6 +152,7 @@ COMPILER_SOURCES = compiler/analyser.c \
 		   compiler/driver.c \
 		   compiler/generator.c \
 		   compiler/generator_ada.c \
+		   compiler/generator_c.c \
 		   compiler/generator_csharp.c \
 		   compiler/generator_dart.c \
 		   compiler/generator_go.c \
@@ -301,7 +302,8 @@ algorithms.mk: GNUmakefile libstemmer/mkalgorithms.pl $(MODULES)
 	libstemmer/mkalgorithms.pl algorithms.mk $(MODULES)
 
 clean:
-	rm -f $(COMPILER_OBJECTS) $(RUNTIME_OBJECTS) \
+	rm -f $(CLEANFILES) \
+	      $(COMPILER_OBJECTS) $(RUNTIME_OBJECTS) \
 	      $(LIBSTEMMER_OBJECTS) $(LIBSTEMMER_UTF8_OBJECTS) $(STEMWORDS_OBJECTS) snowball$(EXEEXT) \
 	      libstemmer.a stemwords$(EXEEXT) \
               libstemmer/modules.h \
@@ -309,26 +311,23 @@ clean:
 	      $(ADA_SOURCES) ada/bin/generate ada/bin/stemwords \
 	      $(C_LIB_SOURCES) $(C_LIB_HEADERS) $(C_LIB_OBJECTS) \
 	      $(C_OTHER_SOURCES) $(C_OTHER_HEADERS) $(C_OTHER_OBJECTS) \
-	      $(CSHARP_SOURCES) \
 	      $(DART_SOURCES) \
 	      $(go_src_dir)/*/*_stemmer.go $(go_src_main_dir)/stemwords/algorithms.go \
 	      $(JAVA_SOURCES) $(JAVA_CLASSES) $(JAVA_RUNTIME_CLASSES) \
 	      $(JS_SOURCES) \
 	      $(PASCAL_SOURCES) pascal/stemwords.dpr pascal/stemwords pascal/*.o pascal/*.ppu \
 	      $(PHP_SOURCES) \
-	      $(PYTHON_SOURCES) \
-	      $(RUST_SOURCES) \
 	      $(ZIG_SOURCES) zig/stemwords$(EXEEXT) \
 	      stemtest$(EXEEXT) $(STEMTEST_OBJECTS) \
               libstemmer/mkinc.mak libstemmer/mkinc_utf8.mak \
               libstemmer/libstemmer.c libstemmer/libstemmer_utf8.c \
 	      algorithms.mk
+	rm -rf $(CLEANDIRS)
 	rm -rf ada/obj dist
 	rm -rf $(DART_BUILD_ARTIFACTS)
 	-rmdir $(c_src_dir)
 	-rmdir $(js_output_dir)
 	-rmdir $(php_output_dir)
-	-rmdir $(python_output_dir)
 
 update_version:
 	perl -pi -e '/SNOWBALL_VERSION/ && s/\d+\.\d+\.\d+/$(SNOWBALL_VERSION)/' \
@@ -365,6 +364,14 @@ snowball$(EXEEXT): $(COMPILER_OBJECTS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
 $(COMPILER_OBJECTS): $(COMPILER_HEADERS)
+
+# List of files/glob patterns to remove on clean.  This gets appended to by
+# each target language section.
+CLEANFILES :=
+
+# List of directories to recursively remove on clean.  This gets appended to by
+# each target language section.
+CLEANDIRS :=
 
 # Ada
 
@@ -505,7 +512,7 @@ $(php_output_dir)/base-stemmer.php: $(php_runtime_dir)/base-stemmer.php
 
 $(python_output_dir)/%_stemmer.py: $(ALGORITHMS)/%.sbl snowball$(EXEEXT)
 	@mkdir -p $(python_output_dir)
-	$(SNOWBALL_COMPILE) $< -python -o $@
+	$(SNOWBALL_COMPILE) $< -python -eprefix _ -o $@
 
 $(python_output_dir)/__init__.py: python/create_init.py $(libstemmer_algorithms:%=$(python_output_dir)/%_stemmer.py)
 	$(python) python/create_init.py $(python_output_dir)
@@ -847,6 +854,8 @@ check_csharp_%: $(STEMMING_DATA_ABS)/%
 	fi
 	@if test -f '$</voc.txt.gz' ; then rm tmp.txt ; fi
 
+CLEANFILES += $(CSHARP_SOURCES) csharp_stemwords$(EXEEXT)
+
 ###############################################################################
 # Dart
 ###############################################################################
@@ -1036,6 +1045,8 @@ check_python_stemwords: $(PYTHON_STEMWORDS_SOURCE) $(PYTHON_SOURCES)
 	cp -a $(PYTHON_SOURCES) python_check/snowballstemmer
 	cp -a $(PYTHON_STEMWORDS_SOURCE) python_check/
 
+CLEANDIRS += python_check python_out
+
 ###############################################################################
 # Rust
 ###############################################################################
@@ -1060,6 +1071,9 @@ check_rust_%: $(STEMMING_DATA_ABS)/%
 	      $(DIFF) -u $</output.txt - ;\
 	fi
 	@if test -f '$</voc.txt.gz' ; then rm tmp.txt ; fi
+
+CLEANFILES += $(RUST_SOURCES) rust/Cargo.lock
+CLEANDIRS += rust/target
 
 ###############################################################################
 # Zig

@@ -229,6 +229,7 @@ struct name {
     byte used_in_definition;    /* (grouping) used in grouping definition? */
     byte amongvar_needed;       /* for routines, externals */
     byte among_with_function;   /* (routines/externals) contains among with func */
+    byte case_collision;        /* A name of the same type differs only by case */
     struct node * definition;   /* (routines/externals) c_define node */
     int used_in_among;          /* (routines/externals) Count of uses in amongs */
     // Initialised to -1; set to -2 if reachable from an external.
@@ -400,6 +401,10 @@ struct generator {
     int temporary_used;  /* track if temporary variable used (Ada and Pascal) */
     char java_import_arrays; /* need `import java.util.Arrays;` */
     char java_import_chararraysequence; /* need `import org.tartarus.snowball.CharArraySequence;` */
+    // Prefix for generated variable names (`v_` by default).
+    const char * varname_prefix;
+    // String to indent by for each margin level (four spaces by default).
+    const char * margin_indent;
 };
 
 /* Special values for failure_label in struct generator. */
@@ -454,12 +459,22 @@ struct options {
 extern struct generator * create_generator(struct analyser * a, struct options * o);
 extern void close_generator(struct generator * g);
 
+static inline int new_label(struct generator * g) {
+    return g->next_label++;
+} 
+
+extern struct str * vars_newname(struct generator * g);
+
+extern void write_margin(struct generator * g);
+
 extern void write_char(struct generator * g, int ch);
 extern void write_newline(struct generator * g);
 extern void write_string(struct generator * g, const char * s);
 extern void write_wchar_as_utf8(struct generator * g, symbol ch);
 extern void write_int(struct generator * g, int i);
+extern void wi3(struct generator * g, int i);
 extern void write_hex4(struct generator * g, int ch);
+extern void write_hex(struct generator * g, int i);
 extern void write_symbol(struct generator * g, symbol s);
 extern void write_s(struct generator * g, const byte * b);
 extern void write_str(struct generator * g, struct str * str);
