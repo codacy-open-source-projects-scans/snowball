@@ -1168,10 +1168,30 @@ static struct node * read_C(struct analyser * a) {
             }
             return n;
         }
-        case c_tomark:
         case c_atmark: {
             struct node * n = new_node(a, token);
-            n->AE = read_AE(a, NULL, 0);
+            struct node * AE = read_AE(a, NULL, 0);
+            if (AE->type == c_cursor) {
+                fprintf(stderr,
+                        "%s:%d: warning: `atmark cursor` is always true\n",
+                        t->file, n->line_number);
+                n->type = c_true;
+            } else {
+                n->AE = AE;
+            }
+            return n;
+        }
+        case c_tomark: {
+            struct node * n = new_node(a, token);
+            struct node * AE = read_AE(a, NULL, 0);
+            if (AE->type == c_cursor) {
+                fprintf(stderr,
+                        "%s:%d: warning: `tomark cursor` is a no-op\n",
+                        t->file, n->line_number);
+                n->type = c_true;
+            } else {
+                n->AE = AE;
+            }
             return n;
         }
         case c_hop: {
@@ -1248,6 +1268,12 @@ static struct node * read_C(struct analyser * a) {
             n->left = read_C(a);
             get_token(a, c_for);
             n->aux = read_C(a);
+            if (n->left->type == c_tomark && n->left->AE->type == c_limit) {
+                fprintf(stderr,
+                        "%s:%d: warning: `setlimit tomark limit` is a no-op\n",
+                        t->file, n->line_number);
+                return n->aux;
+            }
             return n;
         }
         case c_set:
@@ -1430,8 +1456,21 @@ static struct node * read_C(struct analyser * a) {
                 }
             }
             if (p->type == c_mathassign && q) {
-                /* $x = x + 1 doesn't initialise x. */
-                if (!ae_uses_name(p->AE, q)) {
+                if (ae_uses_name(p->AE, q)) {
+                    if (p->AE->type == c_name) {
+                        fprintf(stderr,
+                                "%s:%d: warning: `$",
+                                t->file, p->line_number);
+                        report_s(stderr, p->AE->name->s);
+                        fprintf(stderr, " = ");
+                        report_s(stderr, p->AE->name->s);
+                        fprintf(stderr, "` is a no-op\n");
+                        p->AE = NULL;
+                        p->type = c_true;
+                        q = NULL;
+                    }
+                } else {
+                    // `$x = <AE>` initialises `x` unless AE references `x`.
                     q->initialised = true;
                 }
             }
