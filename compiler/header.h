@@ -258,6 +258,7 @@ struct amongvec {
     int result;      /* the numeric result for the case */
     int line_number; /* for diagnostics and stable sorting */
     int function_index; /* 1-based */
+    int string_index; /* 0-based index giving order of strings in source */
     struct name * function;
 };
 
@@ -424,6 +425,7 @@ struct options {
     FILE * output_h;
     byte syntax_tree;
     byte comments;
+    byte coverage;
     enc encoding;
     enum {
         LANG_C = 0, // We generate C by default.
@@ -473,8 +475,8 @@ extern void write_string(struct generator * g, const char * s);
 extern void write_wchar_as_utf8(struct generator * g, symbol ch);
 extern void write_int(struct generator * g, int i);
 extern void wi3(struct generator * g, int i);
-extern void write_hex4(struct generator * g, int ch);
-extern void write_hex(struct generator * g, int i);
+extern void write_hex4(struct generator * g, unsigned ch);
+extern void write_hex(struct generator * g, unsigned i);
 extern void write_symbol(struct generator * g, symbol s);
 extern void write_s(struct generator * g, const byte * b);
 extern void write_str(struct generator * g, struct str * str);

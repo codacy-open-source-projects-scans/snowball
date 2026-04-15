@@ -686,6 +686,7 @@ static struct node * make_among(struct analyser * a, struct node * p, struct nod
         p->left = q = q->right;
     }
 
+    int string_index = 0;
     while (q) {
         if (q->type == c_literalstring) {
             symbol * b = q->literalstring;
@@ -695,6 +696,7 @@ static struct node * make_among(struct analyser * a, struct node * p, struct nod
             w1->size = SIZE(b);  /* number of characters in string */
             w1->i = -1;          /* index of longest substring */
             w1->result = -1;     /* number of corresponding case expression */
+            w1->string_index = string_index++;
             if (q->left) {
                 struct name * function = q->left->name;
                 w1->function = function;
@@ -2015,11 +2017,11 @@ static int always_set_before_use_(struct node * p, struct node * func,
                 return UNKNOWN;
             }
 #if 0
-            // This check is valid, but currently it's better to not
-            // localise a variable if string-$ is used on it has definitely
-            // been set because for some target languages that means we need to
+            // This check is valid, but currently it's better to not treat
+            // initialising uses of string-$ as definitely setting the string
+            // variable because for some target languages that means we need to
             // initialise to an empty string at the start of the function and
-            // incur overhead from doing so.
+            // we would incur overhead from doing so.
             if (p->left->type == c_assign) {
                 // Special-case `$x = S` because it's easy to handle.
                 return SET_BEFORE_ANY_USE;
@@ -2122,17 +2124,24 @@ static int check_possible_signals(struct analyser * a, struct node * p) {
             return 1;
         }
         case c_not: {
+            // `not` signals the opposite to the command it is applied to.
             int res = p->left->possible_signals;
-            if (res >= 0)
-                res = !res;
-            if (res == 0 && p->right) {
-                if (p->right->type != c_functionend) {
-                    fprintf(stderr, "%s:%d: warning: 'not' always signals f here so following commands are unreachable\n",
-                            a->tokeniser->file, p->line_number);
-                }
-                p->right = NULL;
+            if (res < 0) {
+                // `not` applied to command which can signal `t` or `f`.
+                return res;
             }
-            return res;
+            if (res == 0) {
+                fprintf(stderr, "%s:%d: warning: 'not' applied to command which always signals f\n",
+                        a->tokeniser->file, p->line_number);
+                // Handling the failure will restore the cursor, so equivalent to `do`.
+                p->type = c_do;
+                return 1;
+            }
+            fprintf(stderr, "%s:%d: warning: 'not' applied to command which always signals t\n",
+                    a->tokeniser->file, p->line_number);
+            // This `not` is equivalent to `fail`.
+            p->type = c_fail;
+            return 0;
         }
         case c_setlimit: {
             /* If either always signals f, setlimit does too. */
