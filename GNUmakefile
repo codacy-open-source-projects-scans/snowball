@@ -16,13 +16,13 @@ TEE_TO_TMP_TXT:=tee tmp.txt|
 CLEAN_TMP_TXT:=rm -f tmp.txt
 endif
 
+# Use to hook up runtime tests (see `setup_runtime_tests` target below).
+-include overrides.mk
+
 # `make SNOWBALL_FLAGS=-comments` to generate target language code with
 # comments indicating the corresponding lines in the .sbl source.
 SNOWBALL_FLAGS ?=
 SNOWBALL_COMPILE := ./snowball $(SNOWBALL_FLAGS)
-
-# Use to hook up runtime tests (see `setup_runtime_tests` target below).
--include overrides.mk
 
 # Ada
 
@@ -275,8 +275,8 @@ ZIG_SOURCES = $(libstemmer_algorithms:%=$(zig_src_dir)/%_stemmer.zig) \
 	$(zig_src_dir)/algorithms.zig
 GO_SOURCES = $(libstemmer_algorithms:%=$(go_src_dir)/%_stemmer.go) \
 	$(go_src_main_dir)/stemwords/algorithms.go
-ADA_SOURCES = $(libstemmer_algorithms:%=$(ada_src_dir)/stemmer-%.ads) \
-        $(libstemmer_algorithms:%=$(ada_src_dir)/stemmer-%.adb) \
+ADA_SOURCES = $(libstemmer_algorithms:%=$(ada_src_dir)/stemmer-s_%.ads) \
+        $(libstemmer_algorithms:%=$(ada_src_dir)/stemmer-s_%.adb) \
         $(ada_src_dir)/stemmer-factory.ads $(ada_src_dir)/stemmer-factory.adb
 
 COMPILER_OBJECTS=$(COMPILER_SOURCES:.c=.o)
@@ -311,8 +311,17 @@ update_version:
 		dart/pubspec.yaml \
 		python/setup.py
 
-# Generate code for all languages.
+# Generate and build for all target languages.
 everything: ada all csharp dart go java js pascal python rust zig
+
+# Generate code for all languages.  Override build tools to do as little code
+# building as possible.
+generate: gprbuild=perl -e '$$ARGV[0] eq "-Pgenerate" and unshift @ARGV, "gprbuild" and exec @ARGV' --
+generate: mcs=:
+generate: DART=:
+generate: go=:
+generate: JAVAC=:
+generate: everything
 
 # The directories where generated code goes for all languages.
 ALL_CODE_DIRS := \
@@ -321,12 +330,7 @@ ALL_CODE_DIRS := \
 # When runtime tests are enabled, this gets overridden by overrides.mk.
 BASELINE ?= baseline
 
-baseline-create: gprbuild=perl -e '$$ARGV[0] eq "-Pgenerate" and unshift @ARGV, "gprbuild" and exec @ARGV' --
-baseline-create: mcs=:
-baseline-create: DART=:
-baseline-create: go=:
-baseline-create: JAVAC=:
-baseline-create: everything
+baseline-create: generate
 	rm -rf *.$(BASELINE)
 	for d in $(ALL_CODE_DIRS) ; do cp -a $$d $$d.$(BASELINE) ; done
 	rm -rf *.$(BASELINE)/*.o ada.$(BASELINE)/obj pascal.$(BASELINE)/*.ppu
@@ -335,7 +339,7 @@ baseline-create: everything
 baseline-diff:
 	@for d in $(ALL_CODE_DIRS) ; do diff -ru -x'*.o' -x'obj' -x'*.ppu' -x'*.class' -x'Cargo.lock' -x'target' $$d.$(BASELINE) $$d ; done
 
-.PHONY: all clean update_version everything baseline-create baseline-diff
+.PHONY: all clean update_version everything generate baseline-create baseline-diff
 
 $(STEMMING_DATA)/% $(STEMMING_DATA_ABS)/%:
 	@[ -f '$@' ] || { echo '$@: Test data not found'; echo 'Checkout the snowball-data repo as "$(STEMMING_DATA_ABS)"'; exit 1; }
@@ -365,19 +369,19 @@ CLEANDIRS := dist
 
 ifneq '$(filter grouped-target,$(.FEATURES))' ''
 # Grouped-targets were added in GNU make 4.3.
-$(ada_src_dir)/stemmer-%.adb $(ada_src_dir)/stemmer-%.ads &: $(ALGORITHMS)/%.sbl snowball
+$(ada_src_dir)/stemmer-s_%.adb $(ada_src_dir)/stemmer-s_%.ads &: $(ALGORITHMS)/%.sbl snowball
 else
 # This will fail to recreate the .ads if it is deleted but the corresponding
 # .adb is still present and up-to-date.  That seems better than forcing a
 # serial build with .NOTPARALLEL which it seems can only be applied to an
 # entire makefile, not per-rule.
-$(ada_src_dir)/stemmer-%.ads: $(ada_src_dir)/stemmer-%.adb
+$(ada_src_dir)/stemmer-s_%.ads: $(ada_src_dir)/stemmer-s_%.adb
 	@:
 
-$(ada_src_dir)/stemmer-%.adb: $(ALGORITHMS)/%.sbl snowball
+$(ada_src_dir)/stemmer-s_%.adb: $(ALGORITHMS)/%.sbl snowball
 endif
 	@mkdir -p $(ada_src_dir)
-	$(SNOWBALL_COMPILE) $< -ada -P $* -o $@
+	$(SNOWBALL_COMPILE) $< -ada -P 'S_$*' -o $@
 
 # C
 
@@ -755,10 +759,10 @@ check_ada_%: $(STEMMING_DATA_ABS)/%
 $(ada_src_dir)/stemmer-factory.ads $(ada_src_dir)/stemmer-factory.adb: ada/bin/generate $(MODULES)
 	cd $(ada_src_dir) && ../bin/generate $(libstemmer_algorithms)
 
-ada/bin/generate:
+ada/bin/generate: ada/generate.gpr ada/generate/generate.adb
 	cd ada && $(gprbuild) -Pgenerate -p
 
-ada/bin/stemwords: $(ADA_SOURCES) ada/src/stemmer.adb ada/src/stemmer.ads ada/src/stemwords.adb
+ada/bin/stemwords: ada/stemwords.gpr $(ADA_SOURCES) ada/src/stemmer.adb ada/src/stemmer.ads ada/src/stemwords.adb
 	cd ada && $(gprbuild) -Pstemwords -p
 
 CLEANDIRS += $(ada_src_dir) ada/bin ada/obj
@@ -1142,7 +1146,15 @@ setup_runtime_tests: clean_runtime_tests
 	  echo ok > $$r/$$d/output.txt ;\
 	  echo "$$d UTF_8,ISO_8859_1 $$d" >> $$r/modules.txt ;\
 	done
-	printf '%s:=%s\n' BASELINE rbaseline STEMMING_DATA $(RUNTIME_DATA_DIR) ALGORITHMS tests/runtime MODULES $(RUNTIME_DATA_DIR)/modules.txt THIN_FACTOR '' other_algorithms > overrides.mk
+	printf '%s:=%s\n' \
+	  ALGORITHMS 'tests/runtime' \
+	  BASELINE 'rbaseline' \
+	  MODULES '$(RUNTIME_DATA_DIR)/modules.txt' \
+	  other_algorithms '' \
+	  SNOWBALL_FLAGS '-comments' \
+	  STEMMING_DATA '$(RUNTIME_DATA_DIR)' \
+	  THIN_FACTOR '' \
+	  > overrides.mk
 	rm -f algorithms.mk
 	$(MAKE) algorithms.mk
 

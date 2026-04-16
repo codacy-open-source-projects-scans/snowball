@@ -63,6 +63,10 @@ next_outer: ;
             }
         }
     }
+    symbol c_max = 0x9F;
+    if (g->options->encoding == ENC_SINGLEBYTE) {
+        c_max = 0xFF;
+    }
     write_char(g, '\'');
     for (int i = 0; i < SIZE(s); ++i) {
         symbol c = s[i];
@@ -70,16 +74,35 @@ next_outer: ;
             write_char(g, '{');
             write_char(g, c);
             write_char(g, '}');
-        } else if (c < 32 || c == 127) {
+        } else if (c < 32 ||
+                   (c >= 127 && c <= c_max) ||
+                   c == '\\' ||
+                   c >= 0x590) {
+            // Encode characters which are problematic if emitted literally
+            // using Snowball-style `{U+xx}`:
+            //
+            // * Control characters.
+            //
+            // * For ENC_SINGLEBYTE we encode all non-ASCII to avoid invalid
+            //   UTF-8 in comments (which clang warns about with option
+            //   `-pedantic` or `-Winvalid-utf8`).
+            //
+            // * `\`: In Java, `\u000a` in a comment is interpreted as a
+            //   newline and so exits the comment, while `\uq` gives
+            //   compilation error `illegal unicode escape`.  Since `\` is
+            //   unusual in Snowball literal strings we take the simple
+            //   approach of escaping it for all target languages.
+            //
+            // * Anything >= 0x590 as a crude way to avoid LTR characters
+            //   affecting the rendering of source character order in confusing
+            //   ways.
             write_string(g, "{U+");
             write_hex(g, c);
             write_char(g, '}');
+        } else if (g->options->encoding == ENC_WIDECHARS) {
+            write_wchar_as_utf8(g, s[i]);
         } else {
-            if (g->options->encoding == ENC_WIDECHARS) {
-                write_wchar_as_utf8(g, s[i]);
-            } else {
-                write_char(g, s[i]);
-            }
+            write_char(g, s[i]);
         }
     }
     write_char(g, '\'');
@@ -237,6 +260,7 @@ extern void write_margin(struct generator * g) {
 static int K_needed_(struct node * p, int call_depth) {
     while (p) {
         switch (p->type) {
+            case c_assign:
             case c_atlimit:
             case c_do:
             case c_dollar:
@@ -263,6 +287,7 @@ static int K_needed_(struct node * p, int call_depth) {
             case c_debug:
             case c_functionend:
             case c_not:
+                // Doesn't change the cursor or always restores it.
                 break;
 
             case c_call:
@@ -291,6 +316,19 @@ static int K_needed_(struct node * p, int call_depth) {
 extern int K_needed(struct generator * g, struct node * p) {
     (void)g;
     return K_needed_(p, 0);
+}
+
+// Like K_needed(), but for the sub-node chain of c_and/c_or.  For both
+// of these, the cursor only needs to be restored between nodes so we don't
+// need to check the final node in the chain.
+extern int K_needed_for_connective(struct generator * g, struct node * p) {
+    while (p->right) {
+        if (K_needed(g, p)) {
+            return true;
+        }
+        p = p->right;
+    }
+    return false;
 }
 
 static int repeat_score(struct generator * g, struct node * p, int call_depth) {
