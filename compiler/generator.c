@@ -63,29 +63,37 @@ next_outer: ;
             }
         }
     }
-    symbol c_max = 0x9F;
+
+    symbol ch_max = 0xa0;
     if (g->options->encoding == ENC_SINGLEBYTE) {
-        c_max = 0xFF;
+        ch_max = 0xff;
     }
+
+    int i = 0;
     write_char(g, '\'');
-    for (int i = 0; i < SIZE(s); ++i) {
-        symbol c = s[i];
-        if (c == '\'' || c == '{') {
+    while (i < SIZE(s)) {
+        int ch;
+        if (g->options->encoding == ENC_UTF8) {
+            i += get_utf8(s + i, &ch);
+        } else {
+            ch = s[i++];
+        }
+        if (ch == '\'' || ch == '{') {
             write_char(g, '{');
-            write_char(g, c);
+            write_char(g, ch);
             write_char(g, '}');
-        } else if (c < 32 ||
-                   (c >= 127 && c <= c_max) ||
-                   c == '\\' ||
-                   c >= 0x590) {
+        } else if (ch < 32 ||
+                   (ch >= 127 && ch <= ch_max) ||
+                   ch == '\\' ||
+                   ch >= 0x590) {
             // Encode characters which are problematic if emitted literally
             // using Snowball-style `{U+xx}`:
             //
             // * Control characters.
             //
             // * For ENC_SINGLEBYTE we encode all non-ASCII to avoid invalid
-            //   UTF-8 in comments (which clang warns about with option
-            //   `-pedantic` or `-Winvalid-utf8`).
+            //   UTF-8 in comments (which clang warns about for C/C++ with
+            //   option `-pedantic` or `-Winvalid-utf8`).
             //
             // * `\`: In Java, `\u000a` in a comment is interpreted as a
             //   newline and so exits the comment, while `\uq` gives
@@ -97,12 +105,10 @@ next_outer: ;
             //   affecting the rendering of source character order in confusing
             //   ways.
             write_string(g, "{U+");
-            write_hex(g, c);
+            write_hex(g, ch);
             write_char(g, '}');
-        } else if (g->options->encoding == ENC_WIDECHARS) {
-            write_wchar_as_utf8(g, s[i]);
         } else {
-            write_char(g, s[i]);
+            write_wchar_as_utf8(g, ch);
         }
     }
     write_char(g, '\'');
@@ -261,6 +267,7 @@ static int K_needed_(struct node * p, int call_depth) {
     while (p) {
         switch (p->type) {
             case c_assign:
+            case c_assignto:
             case c_atlimit:
             case c_atmark:
             case c_do:
@@ -292,6 +299,16 @@ static int K_needed_(struct node * p, int call_depth) {
                 // Doesn't change the cursor or always restores it.
                 break;
 
+            case c_attach:
+                // Cursor restored in backwards mode.
+                if (p->mode == m_backward) return true;
+                break;
+
+            case c_insert:
+                // Cursor restored in forwards mode.
+                if (p->mode == m_forward) return true;
+                break;
+
             case c_call:
                 /* Recursive functions aren't typical in snowball programs, so
                  * make the pessimistic assumption that keep is needed if we
@@ -306,6 +323,7 @@ static int K_needed_(struct node * p, int call_depth) {
 
             case c_bra:
             case c_loop:
+            case c_fail:
                 if (K_needed_(p->left, call_depth)) return true;
                 break;
 
