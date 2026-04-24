@@ -25,7 +25,7 @@
 #define DEFAULT_CPLUSPLUS_NAMESPACE "Snowball"
 #define DEFAULT_CPLUSPLUS_BASE_CLASS "Stemmer"
 
-#define DEFAULT_JS_BASE_CLASS "BaseStemmer"
+#define DEFAULT_JS_BASE_CLASS "B"
 
 #define DEFAULT_PYTHON_BASE_CLASS "BaseStemmer"
 
@@ -433,7 +433,6 @@ static struct options * read_options(int * argc_ptr, char * argv[]) {
                 o->name[0] = toupper(o->name[0]);
                 break;
             case LANG_CPLUSPLUS:
-            case LANG_JAVASCRIPT:
             case LANG_PHP:
             case LANG_PYTHON: {
                 /* Upper case initial letter and change each
